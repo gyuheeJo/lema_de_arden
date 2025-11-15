@@ -84,18 +84,6 @@ class AutomataGUI:
         )
         btn_toggle_final.pack(fill="x", pady=2)
 
-        # Estado inicial
-        initial_frame = ttk.Frame(side_frame)
-        initial_frame.pack(fill="x", pady=5)
-        ttk.Label(initial_frame, text="Estado inicial:").pack(side="left")
-        self.initial_combo = ttk.Combobox(
-            initial_frame,
-            textvariable=self.initial_state_name,
-            state="readonly"
-        )
-        self.initial_combo.pack(side="left", fill="x", expand=True)
-        self.initial_combo.bind("<<ComboboxSelected>>", self.set_initial_state)
-
         ttk.Separator(side_frame, orient="horizontal").pack(fill="x", pady=5)
 
         # Transiciones
@@ -173,7 +161,7 @@ class AutomataGUI:
 
     def add_state(self, x, y):
         name = f"q{self.state_counter}"
-        self.state_counter += 1
+        
 
         state = State(name, x, y)
         self.states[name] = state
@@ -189,6 +177,9 @@ class AutomataGUI:
         # Actualizar listas
         self.refresh_states_list()
         self.refresh_state_combos()
+        if self.state_counter == 0:
+            self.set_initial_state(state)
+        self.state_counter += 1
 
     def refresh_states_list(self):
         self.states_list.delete(0, tk.END)
@@ -207,7 +198,6 @@ class AutomataGUI:
         names = sorted(self.states.keys())
         self.from_combo["values"] = names
         self.to_combo["values"] = names
-        self.initial_combo["values"] = names
 
     def get_selected_state_name(self):
         idx = self.states_list.curselection()
@@ -218,12 +208,14 @@ class AutomataGUI:
         return label.split()[0]
 
     def delete_selected_state(self):
+
+        
         if self.state_counter > 0:
             self.state_counter -= 1
-        name = self.get_selected_state_name()
-        if not name:
-            messagebox.showwarning("Atención", "Selecciona un estado para eliminar.")
+        else:
+            messagebox.showwarning("Atención", "No hay estado para eliminar.")
             return
+        name = f"q{self.state_counter}"
         state = self.states.pop(name)
 
         # Borrar del canvas
@@ -274,13 +266,8 @@ class AutomataGUI:
             outline="black", width=2
         )
 
-    def set_initial_state(self, event=None):
-        name = self.initial_state_name.get()
-        # Limpiar anterior
-        for s in self.states.values():
-            s.is_initial = False
-        if name in self.states:
-            self.states[name].is_initial = True
+    def set_initial_state(self, state):
+        state.is_initial = True
         self.refresh_states_list()
         self.redraw_all()
 
@@ -499,11 +486,18 @@ class AutomataGUI:
         # Construir mapa de ecuaciones tipo:
         # A_q = (lambda si es final) + suma de (simbolo * A_destino)
         eqs = {}
+        at_least_one_is_final = False
+        exist_is_initial = False
+        
         for name, state in self.states.items():
             terms = []
+            
+            if state.is_initial:
+                exist_is_initial = True
 
             # Si es final, agregamos lambda (ε)
             if state.is_final:
+                at_least_one_is_final = True
                 terms.append("λ")
 
             for t in self.transitions:
@@ -514,10 +508,11 @@ class AutomataGUI:
                 # Sin términos: conjunto vacío
                 rhs = "∅"
             else:
-                rhs = " U ".join(terms)
+                rhs = "U".join(terms)
 
-            eqs[name] = f"A_{name} = {rhs}"
-        return eqs
+            eqs[name] = f"A_{name}={rhs}"
+            
+        return eqs, at_least_one_is_final, exist_is_initial
     
     def calculate_re(self, eqs: dict):
         # eqs ej: {'q0': 'A_q0 = a*A_q1', 'q1': 'A_q1 = λ + b*A_q0'}
@@ -527,10 +522,16 @@ class AutomataGUI:
         if not self.states:
             messagebox.showinfo("Expresión Regular", "No hay estados definidos.")
             return
-        eqs = self.compute_equations()
+        eqs, at_least_one_is_final, exist_is_initial = self.compute_equations()
+        if not at_least_one_is_final:
+            messagebox.showinfo("Expresión Regular", "No hay estado Final definido.")
+            return
+        if not exist_is_initial:
+            messagebox.showinfo("Expresión Regular", "No hay estados Inicial definido.")
+            return
         win = tk.Toplevel(self.root)
         win.title("Expresión Regular")
-        
+        print("Ecuaciones:", eqs)
         re_exp = self.calculate_re(eqs)
 
         text = tk.Text(win, width=50, height=20)
