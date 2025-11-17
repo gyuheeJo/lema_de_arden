@@ -1,6 +1,8 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
 import math
+from typing import Dict, List
+import re
 
 class State:
     def __init__(self, name, x, y, is_initial=False, is_final=False):
@@ -495,7 +497,7 @@ class AutomataGUI:
             if state.is_initial:
                 exist_is_initial = True
 
-            # Si es final, agregamos lambda (ε)
+            # Si es final, agregamos lambda (λ)
             if state.is_final:
                 at_least_one_is_final = True
                 terms.append("λ")
@@ -513,10 +515,6 @@ class AutomataGUI:
             eqs[name] = f"A_{name}={rhs}"
             
         return eqs, at_least_one_is_final, exist_is_initial
-    
-    def calculate_re(self, eqs: dict):
-        # eqs ej: {'q0': 'A_q0 = a*A_q1', 'q1': 'A_q1 = λ + b*A_q0'}
-        return "<< Expresión regular calculado >>"
 
     def show_re(self):
         if not self.states:
@@ -541,6 +539,192 @@ class AutomataGUI:
         text.insert(tk.END, re_exp + "\n")
         text.config(state="disabled")
 
+
+    def calculate_re(self, eqs: dict):
+        # eqs ej: {'q0': 'A_q0 = a*A_q1', 'q1': 'A_q1 = λ + b*A_q0'}
+
+        #Listado de ecuaciones con correciones
+        normalized_equations = []
+        print(eqs)
+        # Normalizamos las ecuaciones
+        for key, value in eqs.items():
+            # Reemplazamos * por . para evitar confusión entre la clausula de Kleene y el operador de concatenación
+            value = value.replace('*', '.')
+            # Quitamos espacios en blanco
+            value = value.replace(' ', '')
+
+            partes = value.split('=', 1)
+            variable = partes[0].strip()
+            equation = partes[1].strip()
+
+            # Reemplazamos el key por la variable para que sea más rapido de buscar
+            key = variable
+
+            equation_information = {
+                'variable': variable,
+                'result_equation': equation,    #resultado de la ecuación (despues del =)
+                'equation': value,
+                'isResolved': False
+            }
+
+            normalized_equations.append( (key, equation_information) )
+
+        # Invertimos el orden de las ecuaciones para resolver de la ultima a la primera
+        reversed_equations = dict(reversed(normalized_equations))
+
+        # Variable en la que guardaremos la ultima ecuación resuelta (resultado)
+        resolved_equation = ""
+        for key, value in reversed_equations.items():
+            # Resolvemos cada ecuación, guardando la ultima iteración (ecuación 1) para retornarla
+            resolved_equation = resolve_equation(reversed_equations, value)
+            print(resolved_equation)
+            #Actualizamos la ecuación
+            reversed_equations[key] = resolved_equation
+
+        return resolved_equation['result_equation']
+
+
+# Operaciones Lema Arden
+
+# Reemplazamos las variables de las ecuaciones resultas
+def resolve_equation(equations: Dict, equation):
+
+    regex_variables = r'A\_q\d+'
+    #Buscamos todas las variables de la ecuación 
+    variables = re.findall(regex_variables, equation['result_equation'])
+
+    replaced_equation = equation['result_equation']
+
+    # Recorremos todas las variables de la ecuación para intentar remplazarlas
+    for variable in variables:
+        print(f"*** variable {variable}")
+        # omitimos la variable de la ecuación
+        if variable == equation['variable']:
+            continue
+
+        # Si la variable ya fue resuelta, la reemplazamos por su ecuación resuelta
+        if variable in equations and equations[variable].get('isResolved', False):
+            value = equations[variable]['result_equation']
+            if value == 'λ':
+                replacement = 'λ'
+            else:
+                replacement = f'({value})'
+
+            replaced_equation = replaced_equation.replace(variable, replacement)
+
+    # Aplicamos Lema de Arden sobre la ecuación ya con sustituciones (incluso si no hubo reemplazos)
+    resolved_equation = resolve_lema_arden(equation['variable'], replaced_equation)
+
+    # Actualizamos el diccionario de ecuaciones con el resultado y marcamos como resuelta
+    equation['result_equation'] = resolved_equation
+    equation['isResolved'] = True
+    equations[equation['variable']] = equation
+
+    return equation
+
+def resolve_lema_arden(variable: str, equation: str) -> str:
+
+    # Si la ecuación es exactamente 'λ' o no contiene la variable, retornamos
+    if variable not in equation:
+        return _simplify_expression(equation)
+
+    # Dividir terminos por U
+    terms = equation.split('U')
+    A_terms = []  # términos que contienen la variable (a . X)
+    B_terms = []  # términos que no contienen la variable (B)
+
+    print(f"terms {terms}")
+
+    for t in terms:
+        print(f"variable {variable}")
+        print(f"t {t}")
+        if variable in t:
+            A_terms.append(t)
+        else:
+            B_terms.append(t)
+
+        print(f"A_terms {A_terms}")
+        print(f"B_terms {B_terms}")
+        print(f"-----------------")
+
+    # Si no hubo A_terms, no aplicamos Arden
+    if not A_terms:
+        return _simplify_expression(equation)
+
+    # Construimos la unión de factores A = a U b U ...
+    # quitamos duplicados manteniendo orden (usamos dict.fromkeys)
+    A_union_list = list(dict.fromkeys(A_terms))
+    A_union = 'U'.join(A_union_list)
+
+    # Representación del grupo A entre paréntesis si hay más de un término
+    if len(A_union_list) > 1:
+        A_group = f"({A_union})"
+    else:
+        A_group = A_union
+
+    #Eliminamos la variable
+    A_group = A_group.replace(f'.{variable}', '')
+
+    # Aplicar estrella de Kleene
+    A_star = f"{A_group}*"
+
+    # Construir B
+    if not B_terms:
+        B_union = 'λ'
+    else:
+        B_union_list = list(dict.fromkeys(B_terms))
+        B_union = 'U'.join(B_union_list)
+
+    # Si B es λ, X = A* . λ => equivalente a A*
+    if B_union == 'λ':
+        result = A_star
+    else:
+        # si B_union tiene operadores de unión o concatenación, agrupar entre paréntesis
+        if 'U' in B_union or '.' in B_union:
+            B_group = f"({B_union})"
+        else:
+            B_group = B_union
+        result = f"{A_star}.{B_group}"
+
+    # Simplificaciones
+    result = _simplify_expression(result)
+    return result
+
+# Realmente lo necesitamos?
+def _simplify_expression(expr: str) -> str:
+    """
+    Pequeñas simplificaciones sintácticas no agresivas:
+      - elimina ocurrencias de '.λ' y 'λ.' (concatenación con vacío)
+      - elimina paréntesis redundantes simples: (a) -> a
+      - colapsa '((...))' a '(...)'
+    No realiza álgebra compleja de expresiones regulares.
+    """
+    if expr is None:
+        return expr
+
+    s = expr
+
+    # quitar concatenaciones con λ que no aportan
+    s = s.replace('.λ', '')
+    s = s.replace('λ.', '')
+
+    # simplificar paréntesis envolventes redundantes repetidos
+    prev = None
+    while prev != s:
+        prev = s
+        # (a) -> a si a no contiene operadores
+        s = re.sub(r'^\(([^()U\.\*]+)\)$', r'\1', s)
+        # colapsar paréntesis dobles
+        s = re.sub(r'\(\((.*?)\)\)', r'(\1)', s)
+
+    # si queda cadena vacía, interpretamos como λ
+    if s == '':
+        s = 'λ'
+
+    return s
+
+
+#  Main 
 
 def main():
     root = tk.Tk()
