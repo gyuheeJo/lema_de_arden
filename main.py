@@ -589,31 +589,54 @@ class AutomataGUI:
 # Reemplazamos las variables de las ecuaciones resultas
 def resolve_equation(equations: Dict, equation):
 
+    print(f"+++++++++++ equation {equation}")
+
     regex_variables = r'A\_q\d+'
     #Buscamos todas las variables de la ecuación 
     variables = re.findall(regex_variables, equation['result_equation'])
 
-    replaced_equation = equation['result_equation']
+    original_replaced_equation = equation['result_equation']
 
-    # Recorremos todas las variables de la ecuación para intentar remplazarlas
-    for variable in variables:
-        print(f"*** variable {variable}")
-        # omitimos la variable de la ecuación
-        if variable == equation['variable']:
-            continue
+    #Chambonada.... funcion privada para utilziar recursividad
+    def private_class_for_replace_equation(replaced_equation):
+        # Recorremos todas las variables de la ecuación para intentar remplazarlas
+        #print(f"private_class_for_replace_equation {variables}")
+        for variable in variables:
+            #print(f"*** variable {variable}")
+            #print(f"*** equation['variable'] {equation['variable']}")
+            # omitimos la variable de la ecuación
+            if variable == equation['variable']:
+                continue
 
-        # Si la variable ya fue resuelta, la reemplazamos por su ecuación resuelta
-        if variable in equations and equations[variable].get('isResolved', False):
-            value = equations[variable]['result_equation']
-            if value == 'λ':
-                replacement = 'λ'
-            else:
-                replacement = f'({value})'
+            #print(f"*** variable in equations {variable in equations}")
+            #print(f"*** equations[variable].get('isResolved', False) {equations[variable].get('isResolved', False)}")
+            # Si la variable ya fue resuelta, la reemplazamos por su ecuación resuelta
+            if variable in equations and equations[variable].get('isResolved', False):
+                value = equations[variable]['result_equation']
+                if value == 'λ':
+                    replacement = 'λ'
+                else:
+                    replacement = f'({value})'
 
-            replaced_equation = replaced_equation.replace(variable, replacement)
+                replaced_equation = replaced_equation.replace(variable, replacement)
+
+            #print(f"---------- replaced_equation {replaced_equation}")
+
+        #Revalidamos las variables para utilizar la recursividad
+        for variable in variables:
+            if variable != equation['variable'] and variable in replaced_equation and equations[variable].get('isResolved', False):
+                #print(f"************** private_class_for_replace_equation {replaced_equation}")
+                replaced_equation = private_class_for_replace_equation(replaced_equation)
+                #print(f"+*********************** private_class_for_replace_equation 2 {replaced_equation}")
+
+        return replaced_equation
+
+    original_replaced_equation = private_class_for_replace_equation(original_replaced_equation)
+
+    #print(f"---------- original_replaced_equation  {original_replaced_equation}")
 
     # Aplicamos Lema de Arden sobre la ecuación ya con sustituciones (incluso si no hubo reemplazos)
-    resolved_equation = resolve_lema_arden(equation['variable'], replaced_equation)
+    resolved_equation = resolve_lema_arden(equation['variable'], original_replaced_equation)
 
     # Actualizamos el diccionario de ecuaciones con el resultado y marcamos como resuelta
     equation['result_equation'] = resolved_equation
